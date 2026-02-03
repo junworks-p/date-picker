@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { verifyPassword } from './actions';
 
 function generateRoomId() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -14,10 +15,33 @@ function generateRoomId() {
 }
 
 export default function Home() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+
   const [roomName, setRoomName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [createdLink, setCreatedLink] = useState('');
   const router = useRouter();
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password.trim() || isVerifying) return;
+
+    setIsVerifying(true);
+    setPasswordError('');
+
+    const isValid = await verifyPassword(password);
+
+    if (isValid) {
+      setIsAuthenticated(true);
+    } else {
+      setPasswordError('비밀번호가 올바르지 않습니다');
+    }
+
+    setIsVerifying(false);
+  };
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +75,45 @@ export default function Home() {
     const roomId = createdLink.split('/').pop();
     router.push(`/${roomId}`);
   };
+
+  // 비밀번호 입력 화면
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4">
+        <div className="max-w-md mx-auto">
+          <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">
+            약속 날짜 정하기
+          </h1>
+          <p className="text-center text-gray-500 mb-8">
+            관리자 비밀번호를 입력하세요
+          </p>
+
+          <form onSubmit={handlePasswordSubmit} className="bg-white p-6 rounded-xl shadow-lg">
+            <label className="block mb-2 font-medium text-gray-700">
+              비밀번호
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="비밀번호 입력"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 mb-2"
+            />
+            {passwordError && (
+              <p className="text-red-500 text-sm mb-2">{passwordError}</p>
+            )}
+            <button
+              type="submit"
+              disabled={!password.trim() || isVerifying}
+              className="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium mt-2"
+            >
+              {isVerifying ? '확인 중...' : '확인'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
