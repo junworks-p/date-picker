@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabase, Room } from '@/lib/supabase';
 import { verifyPassword } from './actions';
+import { format, parseISO } from 'date-fns';
+import { ko } from 'date-fns/locale';
 
 function generateRoomId() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -22,8 +24,28 @@ export default function Home() {
 
   const [roomName, setRoomName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const [createdLink, setCreatedLink] = useState('');
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const router = useRouter();
+
+  const fetchRooms = async () => {
+    setIsLoadingRooms(true);
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setRooms(data);
+    }
+    setIsLoadingRooms(false);
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchRooms();
+    }
+  }, [isAuthenticated]);
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,19 +83,36 @@ export default function Home() {
       return;
     }
 
-    const link = `${window.location.origin}/${roomId}`;
-    setCreatedLink(link);
+    setRoomName('');
     setIsCreating(false);
+    fetchRooms();
+
+    const link = `${window.location.origin}/${roomId}`;
+    await navigator.clipboard.writeText(link);
+    alert('일정이 생성되었습니다! 링크가 클립보드에 복사되었습니다.');
   };
 
-  const copyLink = async () => {
-    await navigator.clipboard.writeText(createdLink);
+  const copyRoomLink = async (roomId: string) => {
+    const link = `${window.location.origin}/${roomId}`;
+    await navigator.clipboard.writeText(link);
     alert('링크가 복사되었습니다!');
   };
 
-  const goToRoom = () => {
-    const roomId = createdLink.split('/').pop();
-    router.push(`/${roomId}`);
+  const deleteRoom = async (roomId: string, roomName: string) => {
+    if (!confirm(`"${roomName}" 일정을 삭제하시겠습니까?`)) return;
+
+    const { error } = await supabase
+      .from('rooms')
+      .delete()
+      .eq('id', roomId);
+
+    if (error) {
+      console.error('Error deleting room:', error);
+      alert('삭제에 실패했습니다.');
+      return;
+    }
+
+    fetchRooms();
   };
 
   // 비밀번호 입력 화면
@@ -117,80 +156,82 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-md mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-8 text-gray-800">
           약속 날짜 정하기
         </h1>
-        <p className="text-center text-gray-500 mb-8">
-          새 일정을 만들고 친구들에게 링크를 공유하세요
-        </p>
 
-        {!createdLink ? (
-          <form onSubmit={handleCreateRoom} className="bg-white p-6 rounded-xl shadow-lg">
-            <label className="block mb-2 font-medium text-gray-700">
-              일정 이름
-            </label>
+        {/* 새 일정 만들기 */}
+        <div className="bg-white p-6 rounded-xl shadow-lg mb-8">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">새 일정 만들기</h2>
+          <form onSubmit={handleCreateRoom} className="flex gap-2">
             <input
               type="text"
               value={roomName}
               onChange={(e) => setRoomName(e.target.value)}
               placeholder="예: 2월 정기 모임"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 mb-4"
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
             />
             <button
               type="submit"
               disabled={!roomName.trim() || isCreating}
-              className="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium whitespace-nowrap"
             >
-              {isCreating ? '생성 중...' : '새 일정 만들기'}
+              {isCreating ? '생성 중...' : '만들기'}
             </button>
           </form>
-        ) : (
-          <div className="bg-white p-6 rounded-xl shadow-lg">
-            <div className="text-center mb-4">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">
-                일정이 생성되었습니다!
-              </h2>
-              <p className="text-gray-500 text-sm">
-                아래 링크를 친구들에게 공유하세요
-              </p>
-            </div>
+        </div>
 
-            <div className="bg-gray-100 p-3 rounded-lg mb-4 break-all text-sm text-gray-700">
-              {createdLink}
-            </div>
+        {/* 방 목록 */}
+        <div className="bg-white p-6 rounded-xl shadow-lg">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">
+            현재 방 목록 ({rooms.length}개)
+          </h2>
 
-            <div className="flex gap-2">
-              <button
-                onClick={copyLink}
-                className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
-              >
-                링크 복사
-              </button>
-              <button
-                onClick={goToRoom}
-                className="flex-1 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
-              >
-                일정으로 이동
-              </button>
+          {isLoadingRooms ? (
+            <p className="text-gray-500 text-center py-4">로딩 중...</p>
+          ) : rooms.length === 0 ? (
+            <p className="text-gray-500 text-center py-4">생성된 일정이 없습니다</p>
+          ) : (
+            <div className="space-y-3">
+              {rooms.map((room) => (
+                <div
+                  key={room.id}
+                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                >
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-gray-800 truncate">
+                      {room.name}
+                    </h3>
+                    <p className="text-sm text-gray-500">
+                      {format(parseISO(room.created_at), 'yyyy년 M월 d일 생성', { locale: ko })}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 ml-4">
+                    <button
+                      onClick={() => router.push(`/${room.id}`)}
+                      className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                    >
+                      열기
+                    </button>
+                    <button
+                      onClick={() => copyRoomLink(room.id)}
+                      className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm"
+                    >
+                      링크
+                    </button>
+                    <button
+                      onClick={() => deleteRoom(room.id, room.name)}
+                      className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors text-sm"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <button
-              onClick={() => {
-                setCreatedLink('');
-                setRoomName('');
-              }}
-              className="w-full mt-4 py-2 text-gray-500 hover:text-gray-700 transition-colors text-sm"
-            >
-              다른 일정 만들기
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
